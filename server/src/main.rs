@@ -4,7 +4,7 @@ use axum::{
     Router,
 };
 use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener};
-use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::{limit::RequestBodyLimitLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ulid::Ulid;
 
@@ -22,7 +22,8 @@ async fn main() {
         .route("/", post(upload))
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(250 * 1024 * 1024)) // 250MB
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+        .nest_service("/d", ServeDir::new("upload"))
+        .layer(TraceLayer::new_for_http());
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
@@ -30,7 +31,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn upload(mut file: Multipart) {
+async fn upload(mut file: Multipart) -> String {
+    let mut d = String::new();
     while let Some(f) = file.next_field().await.unwrap() {
         let id = Ulid::new().to_string();
         let file_name = f.file_name().unwrap().to_string();
@@ -51,5 +53,7 @@ async fn upload(mut file: Multipart) {
         file.write(&data).await.unwrap();
 
         tracing::info!("upload file: {}", file_name);
+        d = format!("http://localhost:3000/d/{}", file_name);
     }
+    d
 }
