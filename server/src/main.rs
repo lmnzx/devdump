@@ -1,10 +1,14 @@
+use std::time::Duration;
+
 use axum::{
     extract::{DefaultBodyLimit, Multipart},
     routing::post,
     Router,
 };
-use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener};
-use tower_http::{limit::RequestBodyLimitLayer, services::ServeDir, trace::TraceLayer};
+use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener, signal};
+use tower_http::{
+    limit::RequestBodyLimitLayer, services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ulid::Ulid;
 
@@ -18,17 +22,50 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    tokio::fs::create_dir_all("./upload").await.unwrap();
+
     let app = Router::new()
         .route("/", post(upload))
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(250 * 1024 * 1024)) // 250MB
         .nest_service("/d", ServeDir::new("upload"))
-        .layer(TraceLayer::new_for_http());
+        .layer((
+            TraceLayer::new_for_http(),
+            TimeoutLayer::new(Duration::from_secs(5)),
+        ));
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C signal handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM signal handler")
+            .recv()
+            .await
+            .expect("failed to receive SIGTERM signal")
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("shutdown signal received"),
+        _ = terminate => tracing::info!("shutdown signal received"),
+    }
 }
 
 async fn upload(mut file: Multipart) -> String {
