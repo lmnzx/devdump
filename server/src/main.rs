@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use axum::{
-    extract::{DefaultBodyLimit, Multipart},
+    extract::{DefaultBodyLimit, Multipart, State},
     routing::post,
     Router,
 };
@@ -11,6 +11,11 @@ use tower_http::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ulid::Ulid;
+
+#[derive(Debug, Clone)]
+struct Config {
+    hostname: String,
+}
 
 #[tokio::main]
 async fn main() {
@@ -24,6 +29,10 @@ async fn main() {
 
     tokio::fs::create_dir_all("./upload").await.unwrap();
 
+    let hostname = env::var("HOST").unwrap_or("http://localhost:3000".to_string());
+    let config = Config { hostname };
+    tracing::info!("{:?}", config);
+
     let app = Router::new()
         .route("/", post(upload))
         .layer(DefaultBodyLimit::disable())
@@ -32,7 +41,8 @@ async fn main() {
         .layer((
             TraceLayer::new_for_http(),
             TimeoutLayer::new(Duration::from_secs(5)),
-        ));
+        ))
+        .with_state(config);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
@@ -68,7 +78,7 @@ async fn shutdown_signal() {
     }
 }
 
-async fn upload(mut file: Multipart) -> String {
+async fn upload(State(config): State<Config>, mut file: Multipart) -> String {
     let mut d = String::new();
     while let Some(f) = file.next_field().await.unwrap() {
         let id = Ulid::new().to_string();
@@ -90,7 +100,7 @@ async fn upload(mut file: Multipart) -> String {
         file.write(&data).await.unwrap();
 
         tracing::info!("upload file: {}", file_name);
-        d = format!("http://localhost:3000/d/{}", file_name);
+        d = format!("{}/d/{}", config.hostname, file_name); // get from env
     }
     d
 }
