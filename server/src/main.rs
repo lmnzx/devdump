@@ -1,3 +1,5 @@
+mod util;
+
 use std::{env, time::Duration};
 
 use axum::{
@@ -10,7 +12,7 @@ use tower_http::{
     limit::RequestBodyLimitLayer, services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use ulid::Ulid;
+use util::generate_id;
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -81,7 +83,7 @@ async fn shutdown_signal() {
 async fn upload(State(config): State<Config>, mut file: Multipart) -> String {
     let mut d = String::new();
     while let Some(f) = file.next_field().await.unwrap() {
-        let id = Ulid::new().to_string();
+        let id = generate_id();
         let file_name = f.file_name().unwrap().to_string();
         let file_name = file_name.split('.').last();
         let file_name = match file_name {
