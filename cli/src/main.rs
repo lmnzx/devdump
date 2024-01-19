@@ -1,31 +1,47 @@
-/* TODO
-* curl --request POST \
-*  --url https://devdump.fly.dev/ \
-*  --header 'Content-Type: multipart/form-data' \
-*  --header 'User-Agent: devdump/cli' \
-*  --form =@file.jpeg
-*/
+use clap::{Parser, Subcommand};
 
-use std::env;
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    file: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// authenticate
+    Auth { email: Option<String> },
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file: String = env::args().nth(1).unwrap();
-    let ext = file.split('.').last().unwrap();
-    println!("path: {}\next: {}", file, ext);
-    let content: Vec<u8> = tokio::fs::read(&file).await?;
+    let cli = Cli::parse();
 
-    let part = reqwest::multipart::Part::bytes(content).file_name(format!("file.{}", ext));
-    let file = reqwest::multipart::Form::new().part("field_name", part);
+    if let Some(file) = cli.file {
+        let ext = file.split('.').last().unwrap();
+        let content: Vec<u8> = tokio::fs::read(&file).await?;
 
-    let response = reqwest::Client::new()
-        .post("http://localhost:3000/")
-        .multipart(file)
-        .send()
-        .await?;
+        let part = reqwest::multipart::Part::bytes(content).file_name(format!("file.{}", ext));
+        let file = reqwest::multipart::Form::new().part("field_name", part);
 
-    println!("{:#?}", response);
-    println!("{:#?}", response.text().await?);
+        let response = reqwest::Client::new()
+            .post("https://devdump.fly.dev/")
+            .multipart(file)
+            .send()
+            .await?;
+
+        println!("{:#?}", response.text().await?);
+    }
+
+    match &cli.command {
+        Some(Commands::Auth { email }) => {
+            println!("Authenticating with email: {:?}", email);
+        }
+        None => {}
+    }
 
     Ok(())
 }
