@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let file = reqwest::multipart::Form::new().part("field_name", part);
 
         let response = reqwest::Client::new()
-            .post("https://devdump.fly.dev/")
+            .post("http://localhost:3000/")
             .multipart(file)
             .send()
             .await?;

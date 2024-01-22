@@ -1,22 +1,29 @@
-mod util;
-
+use serde::Deserialize;
 use std::{env, time::Duration};
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
     routing::post,
-    Router,
+    Form, Router,
 };
-use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener, signal};
+use server::email_service::send_email;
+use server::shutdown::shutdown_signal;
+use server::util::generate_id;
+
+use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener};
 use tower_http::{
     limit::RequestBodyLimitLayer, services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use util::generate_id;
 
 #[derive(Debug, Clone)]
 struct Config {
     hostname: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginForm {
+    email: String,
 }
 
 #[tokio::main]
@@ -37,6 +44,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", post(upload))
+        .route("/signup", post(signup))
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(250 * 1024 * 1024)) // 250MB
         .nest_service("/d", ServeDir::new("upload"))
@@ -55,35 +63,20 @@ async fn main() {
         .unwrap();
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install CTRL+C signal handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM signal handler")
-            .recv()
-            .await
-            .expect("failed to receive SIGTERM signal")
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => tracing::info!("shutdown signal received"),
-        _ = terminate => tracing::info!("shutdown signal received"),
-    }
+async fn signup(Form(login_form): Form<LoginForm>) {
+    send_email(
+        login_form.email.clone(),
+        "test".to_string(),
+        "test".to_string(),
+    )
+    .await;
+    tracing::info!("email: {:?}", login_form.email)
 }
 
 async fn upload(State(config): State<Config>, mut file: Multipart) -> String {
     let mut d = String::new();
     while let Some(f) = file.next_field().await.unwrap() {
-        let id = generate_id();
+        let id = generate_id(6);
         let file_name = f.file_name().unwrap().to_string();
         let file_name = file_name.split('.').last();
         let file_name = match file_name {
@@ -99,7 +92,7 @@ async fn upload(State(config): State<Config>, mut file: Multipart) -> String {
         let mut file = File::create(format!("./upload/{}", file_name))
             .await
             .unwrap();
-        file.write(&data).await.unwrap();
+        file.write_all(&data).await.unwrap();
 
         tracing::info!("upload file: {}", file_name);
         d = format!("{}/d/{}", config.hostname, file_name); // get from env
