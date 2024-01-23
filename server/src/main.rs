@@ -1,15 +1,20 @@
+use redis::AsyncCommands;
 use serde::Deserialize;
-use std::{env, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
+    http::StatusCode,
+    response::IntoResponse,
     routing::post,
     Form, Router,
 };
+
 use server::email_service::send_email;
 use server::shutdown::shutdown_signal;
 use server::util::generate_id;
 
+use sqlx::postgres::{self, PgPoolOptions};
 use tokio::{fs::File, io::AsyncWriteExt, net::TcpListener};
 use tower_http::{
     limit::RequestBodyLimitLayer, services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer,
@@ -19,6 +24,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[derive(Debug, Clone)]
 struct Config {
     hostname: String,
+    pgpool: postgres::PgPool,
+    redis: Arc<redis::Client>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,11 +43,27 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect_lazy("postgres://postgres:password@localhost:5432/devdump")
+        .unwrap();
+
+    // running slqx migration
+    sqlx::migrate!().run(&pool).await.unwrap();
+
+    // redis
+
+    let redis_client = Arc::new(redis::Client::open("redis://127.0.0.1/").unwrap());
+
     tokio::fs::create_dir_all("./upload").await.unwrap();
 
     let hostname = env::var("HOST").unwrap_or("http://localhost:3000".to_string());
-    let config = Config { hostname };
-    tracing::info!("{:?}", config);
+    let config = Config {
+        hostname,
+        pgpool: pool,
+        redis: redis_client,
+    };
+    // tracing::info!("{:?}", config);
 
     let app = Router::new()
         .route("/", post(upload))
@@ -63,14 +86,34 @@ async fn main() {
         .unwrap();
 }
 
-async fn signup(Form(login_form): Form<LoginForm>) {
-    send_email(
-        login_form.email.clone(),
-        "test".to_string(),
-        "test".to_string(),
-    )
-    .await;
-    tracing::info!("email: {:?}", login_form.email)
+async fn signup(
+    State(config): State<Config>,
+    Form(login_form): Form<LoginForm>,
+) -> impl IntoResponse {
+    tracing::info!("signup: {:?}", login_form);
+
+    match sqlx::query!(
+    "INSERT INTO users (id, email, created_on, last_login, status) VALUES ($1, $2, $3, NULL, 'pending_confirmaton')",
+    uuid::Uuid::new_v4(),
+    login_form.email,
+    chrono::Utc::now()
+    ).execute(&config.pgpool).await {
+        Ok(_) => {
+            let token = uuid::Uuid::new_v4().to_string();
+            let mut conn = config.redis.get_async_connection().await.unwrap();
+            conn.set_ex::<String, String, ()>(token.to_owned(), login_form.email.to_owned(), 60 * 30).await.unwrap();
+            let body = format!(
+                "Click this link to confirm your email: {}/confirm?token={}",
+                config.hostname, token
+            );
+            send_email(login_form.email, "Confirm your email".to_string(), body).await;
+            return (StatusCode::OK, "ok");
+        }
+        Err(e) => {
+            tracing::error!("error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "error");
+        }
+    };
 }
 
 async fn upload(State(config): State<Config>, mut file: Multipart) -> String {

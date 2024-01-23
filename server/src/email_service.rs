@@ -15,7 +15,7 @@ pub async fn send_email(to: String, sub: String, body: String) {
     let mailer = AsyncSmtpTransport::<Tokio1Executor>::unencrypted_localhost();
 
     match mailer.send(email).await {
-        Ok(_) => println!("Email sent successfully!"),
-        Err(e) => panic!("Could not send email: {:?}", e),
+        Ok(_) => tracing::info!("Email sent successfully!"),
+        Err(e) => tracing::error!("Could not send email: {:?}", e),
     }
 }
