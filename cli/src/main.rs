@@ -12,7 +12,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// authenticate
+    // authenticate
     Auth { email: Option<String> },
 }
 
