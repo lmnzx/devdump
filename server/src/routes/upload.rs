@@ -1,4 +1,9 @@
-use axum::{body::Bytes, http::StatusCode, BoxError};
+use axum::{
+    body::Bytes,
+    extract::{Path, Request},
+    http::StatusCode,
+    BoxError,
+};
 use futures::{Stream, TryStreamExt};
 use tokio::{
     fs::File,
@@ -8,7 +13,15 @@ use tokio_util::io::StreamReader;
 
 const UPLOADS_DIRECTORY: &str = "upload";
 
-pub async fn stream_to_file<S, E>(path: &str, stream: S) -> Result<(), (StatusCode, String)>
+// stream to file
+pub async fn upload(
+    Path(file_name): Path<String>,
+    request: Request,
+) -> Result<(), (StatusCode, String)> {
+    return stream_to_file(&file_name, request.into_body().into_data_stream()).await;
+}
+
+async fn stream_to_file<S, E>(path: &str, stream: S) -> Result<(), (StatusCode, String)>
 where
     S: Stream<Item = Result<Bytes, E>>,
     E: Into<BoxError>,
