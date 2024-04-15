@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use tokio::fs::File;
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -16,24 +18,28 @@ enum Commands {
     Auth { email: Option<String> },
 }
 
+fn file_to_request_body(file: File) -> reqwest::Body {
+    let stream = FramedRead::new(file, BytesCodec::new());
+    let body = reqwest::Body::wrap_stream(stream);
+    return body;
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    if let Some(file) = cli.file {
-        let ext = file.split('.').last().unwrap();
-        let content: Vec<u8> = tokio::fs::read(&file).await?;
-
-        let part = reqwest::multipart::Part::bytes(content).file_name(format!("file.{}", ext));
-        let file = reqwest::multipart::Form::new().part("field_name", part);
+    if let Some(path) = cli.file {
+        let file = File::open(&path).await?;
+        let file_name = path.split('/').last().ok_or("")?;
+        let url = format!("http://localhost:3000/upload/{}", file_name);
 
         let response = reqwest::Client::new()
-            .post("http://localhost:3000/")
-            .multipart(file)
+            .post(url)
+            .body(file_to_request_body(file))
             .send()
             .await?;
 
-        println!("{:#?}", response.text().await?);
+        println!("{}", response.status());
     }
 
     match &cli.command {

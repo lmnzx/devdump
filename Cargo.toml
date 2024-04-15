@@ -1,12 +1,12 @@
 [workspace]
 
-members = [ "cli", "server"]
+members = ["cli", "server"]
 
 resolver = "2"
 
 [profile.release]
-opt-level = "z" # Optimize for small binary size
-lto = true # Enable link-time optimization
+opt-level = "z"   # Optimize for small binary size
+lto = true        # Enable link-time optimization
 codegen-units = 1 # Compile all code into a single unit
-panic = "abort" # Abort on panic
+panic = "abort"   # Abort on panic
 strip = "symbols" # Strip symbols from the binary
