@@ -13,7 +13,7 @@ use tokio_util::io::StreamReader;
 
 const UPLOADS_DIRECTORY: &str = "upload";
 
-// stream to file
+/// read the request body and stream the file included in the request body into a local folder
 pub async fn upload(
     Path(file_name): Path<String>,
     request: Request,
@@ -21,6 +21,8 @@ pub async fn upload(
     return stream_to_file(&file_name, request.into_body().into_data_stream()).await;
 }
 
+/// take the ```futures_core::stream``` item and then converts the stream into an ```AsyncRead```
+/// uses ```tokio::io::util::BufWriter``` to write the body to the file
 async fn stream_to_file<S, E>(path: &str, stream: S) -> Result<(), (StatusCode, String)>
 where
     S: Stream<Item = Result<Bytes, E>>,
@@ -50,9 +52,7 @@ where
     .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
 }
 
-// prevent directory travarsal attacks
-// ensure the path consists of exactly
-// one normal component
+/// prevent directory travarsal attacks ensure the path consists of exactly one normal component
 fn path_is_valid(path: &str) -> bool {
     let path = std::path::Path::new(path);
     let mut components = path.components().peekable();

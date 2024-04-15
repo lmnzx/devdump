@@ -1,8 +1,8 @@
-use server::routes::router;
-use server::shutdown::shutdown_signal;
-
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use server::routes::router;
+use server::shutdown::shutdown_signal;
 
 #[tokio::main]
 async fn main() {
